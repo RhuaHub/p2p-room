@@ -2,7 +2,7 @@
 
 浏览器点对点的实时聊天室：文本、图片、文件、语音、摄像头视频通话、视频共享全程 P2P 直连，业务数据不经过任何服务器。纯静态页面，无构建步骤，GitHub Pages 直接托管。
 
-**在线地址：** https://rhuahub.github.io/p2p-room/
+**在线地址：** https://chat.rhua.net/（Cloudflare Pages + 自定义域名）
 
 ## 功能
 
@@ -71,7 +71,9 @@ node tools/e2e.js            # 需 Node 18+ 与本机 Edge / Chrome
 
 推送到 `main` 分支后，在仓库 **Settings → Pages → Build and deployment** 选择 `Deploy from a branch` / `main` / `/ (root)` 即可上线。
 
-### Cloudflare Pages（推荐）
+### Cloudflare Pages（当前线上方案）
+
+已上线：**https://chat.rhua.net/**
 
 Workers & Pages → **Create** → **Pages** → **Connect to Git**，选中 `RhuaHub/p2p-room` 后填：
 
