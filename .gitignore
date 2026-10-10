@@ -1,0 +1,12 @@
+.workbuddy/
+dist/
+.shots/
+.tmp-shots/
+.tmp-*
+*.log
+.DS_Store
+Thumbs.db
+node_modules/
+__pycache__/
+.wrangler/
+.dev.vars
