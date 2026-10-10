@@ -32,6 +32,11 @@
     roster: {},         // 进房时已存在的成员（抑制"加入"提示）
     voiceStream: null,
     voiceMuted: false,
+    camStream: null,
+    camMuted: false,
+    camVideoOff: false,
+    camCalls: {},
+    vTiles: {},         // peerId / 'self' -> 视频瓦片元素
     shareStream: null,
     voiceCalls: {},
     shareCalls: {},
@@ -281,6 +286,7 @@
           nick: (conn.metadata && conn.metadata.nick) || '成员',
           host: false,
           voice: { active: false, muted: false },
+          cam: { active: false, video: true, muted: false },
           speaking: false
         };
       } else {
@@ -291,6 +297,7 @@
       setStatus('ok', '已连接');
       renderUsers();
       if (S.voiceStream) callPeer(conn.peer, 'voice');
+      if (S.camStream) callPeer(conn.peer, 'cam');
       if (S.shareStream) callPeer(conn.peer, 'share');
       if (S.stage.owner === S.myId && S.stage.mode !== 'p2p' && S.stage.url) {
         send(conn, { k: 'stage', url: S.stage.url, mode: S.stage.mode, embed: S.stage.embed, nick: S.nick });
@@ -327,7 +334,9 @@
     if (!info) return;
     delete S.conns[peerId];
     closeCall(S.voiceCalls, peerId);
+    closeCall(S.camCalls, peerId);
     closeCall(S.shareCalls, peerId);
+    removeTile(peerId);
     removeAudio(peerId);
     stopDetector(peerId);
     if (S.stage.owner === peerId) clearStage(true);
@@ -369,6 +378,16 @@
       renderUsers();
       return;
     }
+    if (d.k === 'cam') {
+      if (info) {
+        info.cam = { active: !!d.active, video: d.video !== false, muted: !!d.muted };
+        if (!d.active) info.speaking = false;
+      }
+      if (!d.active) removeTile(peerId);
+      else setTileFlags(peerId, info && info.cam);
+      renderUsers();
+      return;
+    }
     if (d.k === 'stage') {
       openStage(d.url, d.mode, d.embed, peerId, d.nick, false);
       return;
@@ -396,13 +415,15 @@
     var ids = Object.keys(S.conns);
     var rows = [userRow({
       id: S.myId, nick: S.nick, me: true, host: S.isHost,
-      voice: { active: !!S.voiceStream, muted: S.voiceMuted }, speaking: S.selfSpeaking
+      voice: { active: !!S.voiceStream, muted: S.voiceMuted },
+      cam: { active: !!S.camStream, video: !S.camVideoOff, muted: S.camMuted },
+      speaking: S.selfSpeaking
     })];
     ids.forEach(function (id) {
       var o = S.conns[id];
       rows.push(userRow({
         id: id, nick: o.nick, host: !!o.host || id === S.roomId,
-        voice: o.voice, speaking: o.speaking
+        voice: o.voice, cam: o.cam, speaking: o.speaking
       }));
     });
     $('#users').innerHTML = rows.join('');
@@ -413,8 +434,20 @@
     var initial = esc((u.nick || '?').trim().charAt(0).toUpperCase());
     var tags = (u.me ? '<span class="tag me">我</span>' : '') + (u.host ? '<span class="tag host">房主</span>' : '');
     var v = u.voice || {};
+    var c = u.cam || {};
     var sub;
-    if (v.active && v.muted) {
+    if (c.active) {
+      var tail = '';
+      if (c.muted && !c.video) tail = '已静音 · 画面已关';
+      else if (c.muted) tail = '已静音';
+      else if (!c.video) tail = '已关闭画面';
+      else if (u.speaking) tail = '正在说话';
+      else tail = '视频通话中';
+      sub = '<svg class="cam-ico ' + (c.video ? 'on' : 'off') + '" viewBox="0 0 24 24">' +
+        '<rect x="2" y="6" width="13" height="12" rx="3"/><path d="M15 10.6l6-3.4v9.6l-6-3.4z"/></svg>' +
+        (c.muted ? '<svg class="mic-ico off" viewBox="0 0 24 24"><path d="M9 6a3 3 0 0 1 6 0v5M5.5 11a6.5 6.5 0 0 0 10 5.5M12 17.5V21M4 4l16 16"/></svg>' : '') +
+        tail;
+    } else if (v.active && v.muted) {
       sub = '<svg class="mic-ico off" viewBox="0 0 24 24"><path d="M9 6a3 3 0 0 1 6 0v5M5.5 11a6.5 6.5 0 0 0 10 5.5M12 17.5V21M4 4l16 16"/></svg>已静音';
     } else if (v.active && u.speaking) {
       sub = '<span class="wave on"><i></i><i></i><i></i><i></i></span>正在说话';
@@ -683,8 +716,27 @@
   });
 
   /* ---------------- 语音 ---------------- */
-  $('#micBtn').onclick = function () { if (S.voiceStream) stopVoice(); else startVoice(); };
-  $('#muteBtn').onclick = toggleMute;
+  $('#micBtn').onclick = function () {
+    if (S.camStream) stopCam();
+    else if (S.voiceStream) stopVoice();
+    else startVoice();
+  };
+  $('#muteBtn').onclick = function () { if (S.camStream) toggleCamAudio(); else toggleMute(); };
+
+  /* 统一维护底部麦克风 / 静音 / 摄像头按钮的状态 */
+  function syncMediaButtons() {
+    var cam = !!S.camStream;
+    var live = cam || !!S.voiceStream;
+    var muted = cam ? S.camMuted : S.voiceMuted;
+    $('#micBtn').classList.toggle('active', live);
+    $('#micBtn').title = cam ? '结束视频通话' : (live ? '关闭麦克风' : '开启麦克风');
+    $('#muteBtn').style.display = live ? '' : 'none';
+    $('#muteBtn').classList.toggle('muted', muted);
+    $('#muteBtn').title = muted ? '取消静音' : '静音';
+    $('#camBtn').classList.toggle('active', cam);
+    $('#camBtn').classList.toggle('muted', cam && S.camVideoOff);
+    $('#camBtn').title = cam ? '结束视频通话' : '开启摄像头视频通话';
+  }
 
   function startVoice() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -697,10 +749,7 @@
       S.voiceMuted = false;
       Object.keys(S.conns).forEach(function (id) { callPeer(id, 'voice'); });
       broadcast({ k: 'voice', active: true, muted: false });
-      $('#micBtn').classList.add('active');
-      $('#micBtn').title = '关闭麦克风';
-      $('#muteBtn').style.display = '';
-      $('#muteBtn').classList.remove('muted');
+      syncMediaButtons();
       startDetector('self', stream, function (sp) { S.selfSpeaking = sp; renderUsers(); });
       renderUsers();
       toast('麦克风已开启，房间内成员可听到你', 'ok');
@@ -712,37 +761,34 @@
     });
   }
 
-  function stopVoice() {
+  function stopVoice(quiet) {
     Object.keys(S.voiceCalls).forEach(function (id) { closeCall(S.voiceCalls, id); });
     if (S.voiceStream) { S.voiceStream.getTracks().forEach(function (t) { t.stop(); }); S.voiceStream = null; }
     S.voiceMuted = false;
     S.selfSpeaking = false;
     stopDetector('self');
     broadcast({ k: 'voice', active: false, muted: false });
-    $('#micBtn').classList.remove('active');
-    $('#micBtn').title = '开启麦克风';
-    $('#muteBtn').style.display = 'none';
-    $('#muteBtn').classList.remove('muted');
+    syncMediaButtons();
     renderUsers();
-    toast('已退出语音', 'info', 2000);
+    if (!quiet) toast('已退出语音', 'info', 2000);
   }
 
   function toggleMute() {
     if (!S.voiceStream) return;
     S.voiceMuted = !S.voiceMuted;
     S.voiceStream.getAudioTracks().forEach(function (t) { t.enabled = !S.voiceMuted; });
-    $('#muteBtn').classList.toggle('muted', S.voiceMuted);
-    $('#muteBtn').title = S.voiceMuted ? '取消静音' : '静音';
     if (S.voiceMuted) S.selfSpeaking = false;
     broadcast({ k: 'voice', active: true, muted: S.voiceMuted });
+    syncMediaButtons();
     renderUsers();
     toast(S.voiceMuted ? '已静音，对方听不到你' : '已取消静音', 'info', 1800);
   }
 
+  var CALL_MAP = { voice: 'voiceCalls', cam: 'camCalls', share: 'shareCalls' };
   function callPeer(peerId, kind) {
-    var stream = kind === 'voice' ? S.voiceStream : S.shareStream;
+    var stream = kind === 'voice' ? S.voiceStream : kind === 'cam' ? S.camStream : S.shareStream;
     if (!stream) return;
-    var map = kind === 'voice' ? S.voiceCalls : S.shareCalls;
+    var map = S[CALL_MAP[kind] || 'voiceCalls'];
     if (map[peerId]) return;
     try {
       var call = S.peer.call(peerId, stream, { metadata: { kind: kind, nick: S.nick } });
@@ -757,13 +803,216 @@
     var nick = (call.metadata && call.metadata.nick) || (S.conns[call.peer] || {}).nick || '成员';
     try { call.answer(); } catch (e) { return; }
     call.on('stream', function (stream) {
-      if (kind === 'voice') attachAudio(call.peer, stream);
+      if (kind === 'cam') attachCam(call.peer, stream, nick);
+      else if (kind === 'voice') attachAudio(call.peer, stream);
       else showShare(call.peer, stream, nick);
     });
     call.on('close', function () {
-      if (kind === 'voice') { removeAudio(call.peer); stopDetector(call.peer); }
+      if (kind === 'cam') { removeTile(call.peer); stopDetector(call.peer); markCamOff(call.peer); }
+      else if (kind === 'voice') { removeAudio(call.peer); stopDetector(call.peer); }
       else if (S.stage.owner === call.peer) clearStage(true);
     });
+    call.on('error', function () {
+      if (kind === 'cam') { removeTile(call.peer); stopDetector(call.peer); markCamOff(call.peer); }
+    });
+  }
+  function markCamOff(peerId) {
+    var info = S.conns[peerId];
+    if (info && info.cam && info.cam.active) { info.cam.active = false; info.speaking = false; renderUsers(); }
+  }
+
+  /* ================= 摄像头视频通话（mesh 多人） ================= */
+  var TILE_ICONS = {
+    micOn: '<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="10" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>',
+    micOff: '<svg viewBox="0 0 24 24"><path d="M9 6a3 3 0 0 1 6 0v5M5.5 11a6.5 6.5 0 0 0 10 5.5M12 17.5V21M8.5 21h7M4 4l16 16"/></svg>',
+    camOn: '<svg viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="12" height="11" rx="2.5"/><path d="M14.5 11l6.5-3.4v8.8L14.5 13z"/></svg>',
+    camOff: '<svg viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="12" height="11" rx="2.5"/><path d="M14.5 11l6.5-3.4v8.8L14.5 13z"/><path d="M3 3l18 18"/></svg>'
+  };
+
+  $('#camBtn').onclick = function () { if (S.camStream) stopCam(); else startCam(); };
+
+  function startCam() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast('当前环境不支持摄像头采集（需 https 或 localhost）', 'err', 5000); return;
+    }
+    navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 }, facingMode: 'user' }
+    }).then(function (stream) {
+      if (S.voiceStream) stopVoice(true);          // 视频通话自带音频，避免双路回声
+      S.camStream = stream;
+      S.camMuted = false;
+      S.camVideoOff = false;
+      addTile('self', S.nick, stream, true);
+      Object.keys(S.conns).forEach(function (id) { callPeer(id, 'cam'); });
+      broadcast({ k: 'cam', active: true, video: true, muted: false });
+      startDetector('self', stream, function (sp) {
+        S.selfSpeaking = sp;
+        renderUsers();
+        setTileSpeaking('self', sp);
+      });
+      syncMediaButtons();
+      renderUsers();
+      toast('摄像头已开启，房间成员可看到并听到你', 'ok', 3200);
+    }).catch(function (e) {
+      var n = e.name || '';
+      if (n === 'NotFoundError' || n === 'OverconstrainedError' || n === 'DevicesNotFoundError') {
+        toast('未检测到可用摄像头，已切换为纯语音', 'warn', 4000);
+        startVoice();
+        return;
+      }
+      toast(n === 'NotAllowedError' ? '摄像头权限被拒绝，请在浏览器地址栏放行后重试'
+        : n === 'NotReadableError' ? '摄像头被其他程序占用，关闭后重试'
+        : '无法开启摄像头：' + (e.message || n), 'err', 5000);
+    });
+  }
+
+  function stopCam() {
+    Object.keys(S.camCalls).forEach(function (id) { closeCall(S.camCalls, id); });
+    if (S.camStream) {
+      S.camStream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) { /* noop */ } });
+      S.camStream = null;
+    }
+    S.camMuted = false;
+    S.camVideoOff = false;
+    S.selfSpeaking = false;
+    stopDetector('self');
+    removeTile('self');
+    broadcast({ k: 'cam', active: false });
+    syncMediaButtons();
+    renderUsers();
+    toast('已结束视频通话', 'info', 2000);
+  }
+
+  function toggleCamAudio() {
+    if (!S.camStream) return;
+    S.camMuted = !S.camMuted;
+    S.camStream.getAudioTracks().forEach(function (t) { t.enabled = !S.camMuted; });
+    if (S.camMuted) { S.selfSpeaking = false; setTileSpeaking('self', false); }
+    broadcast({ k: 'cam', active: true, video: !S.camVideoOff, muted: S.camMuted });
+    syncMediaButtons();
+    syncSelfTile();
+    renderUsers();
+    toast(S.camMuted ? '已静音，对方听不到你' : '已取消静音', 'info', 1800);
+  }
+
+  function toggleCamVideo() {
+    if (!S.camStream) return;
+    S.camVideoOff = !S.camVideoOff;
+    S.camStream.getVideoTracks().forEach(function (t) { t.enabled = !S.camVideoOff; });
+    broadcast({ k: 'cam', active: true, video: !S.camVideoOff, muted: S.camMuted });
+    syncMediaButtons();
+    syncSelfTile();
+    renderUsers();
+    toast(S.camVideoOff ? '已关闭画面，仅保留语音' : '画面已恢复', 'info', 1800);
+  }
+
+  /* ---- 画面瓦片 ---- */
+  function addTile(key, nick, stream, isSelf) {
+    removeTile(key);
+    var el = document.createElement('div');
+    el.className = 'vt' + (isSelf ? ' me' : '');
+    el.dataset.key = key;
+    var initial = esc((nick || '?').trim().charAt(0).toUpperCase());
+    el.innerHTML =
+      '<video autoplay playsinline' + (isSelf ? ' muted' : '') + '></video>' +
+      '<div class="vt-av"><div class="av" style="background:' + colorOf(isSelf ? (S.myId || nick) : key) + '">' + initial + '</div></div>' +
+      '<div class="vt-bar"><span class="vt-nm">' + esc(nick) + (isSelf ? '（我）' : '') + '</span>' +
+        '<span class="vt-st">' + (isSelf ? '' : '<span class="st-mic">' + TILE_ICONS.micOn + '</span>') + '</span></div>' +
+      (isSelf
+        ? '<div class="vt-ctl">' +
+            '<button data-c="mic" title="静音 / 取消静音">' + TILE_ICONS.micOn + '</button>' +
+            '<button data-c="cam" title="关闭 / 开启画面">' + TILE_ICONS.camOn + '</button>' +
+          '</div>'
+        : '');
+    var v = el.querySelector('video');
+    v.srcObject = stream;
+    var p = v.play();
+    if (p && p.catch) {
+      p.catch(function () {
+        if (isSelf) return;
+        var tip = document.createElement('div');
+        tip.className = 'vt-tip';
+        tip.textContent = '点击播放 ' + nick + ' 的画面与声音';
+        tip.onclick = function () {
+          v.play().then(function () { if (tip.parentNode) tip.parentNode.removeChild(tip); })
+            .catch(function () { /* noop */ });
+        };
+        el.appendChild(tip);
+      });
+    }
+    if (isSelf) {
+      el.querySelector('[data-c="mic"]').onclick = toggleCamAudio;
+      el.querySelector('[data-c="cam"]').onclick = toggleCamVideo;
+    }
+    S.vTiles[key] = el;
+    $('#videos').appendChild(el);
+    syncGrid();
+    if (isSelf) syncSelfTile();
+  }
+
+  function removeTile(key) {
+    var el = S.vTiles[key];
+    if (!el) return;
+    var v = el.querySelector('video');
+    if (v) { try { v.pause(); v.srcObject = null; } catch (e) { /* noop */ } }
+    if (el.parentNode) el.parentNode.removeChild(el);
+    delete S.vTiles[key];
+    syncGrid();
+  }
+
+  function syncGrid() {
+    $('#videos').classList.toggle('on', Object.keys(S.vTiles).length > 0);
+  }
+
+  function syncSelfTile() {
+    var el = S.vTiles.self;
+    if (!el) return;
+    el.classList.toggle('novid', S.camVideoOff);
+    var mic = el.querySelector('[data-c="mic"]');
+    var cam = el.querySelector('[data-c="cam"]');
+    if (mic) {
+      mic.innerHTML = S.camMuted ? TILE_ICONS.micOff : TILE_ICONS.micOn;
+      mic.classList.toggle('off', S.camMuted);
+      mic.title = S.camMuted ? '取消静音' : '静音';
+    }
+    if (cam) {
+      cam.innerHTML = S.camVideoOff ? TILE_ICONS.camOff : TILE_ICONS.camOn;
+      cam.classList.toggle('off', S.camVideoOff);
+      cam.title = S.camVideoOff ? '开启画面' : '关闭画面';
+    }
+  }
+
+  function setTileFlags(peerId, cam) {
+    var el = S.vTiles[peerId];
+    if (!el || !cam) return;
+    el.classList.toggle('novid', !cam.video);
+    var st = el.querySelector('.st-mic');
+    if (st) {
+      st.innerHTML = cam.muted ? TILE_ICONS.micOff : TILE_ICONS.micOn;
+      st.className = 'st-mic' + (cam.muted ? ' off' : '');
+    }
+  }
+
+  function setTileSpeaking(key, speaking) {
+    var el = S.vTiles[key];
+    if (el) el.classList.toggle('speaking', !!speaking);
+  }
+
+  function attachCam(peerId, stream, nick) {
+    var info = S.conns[peerId];
+    if (!info) return;
+    var prev = (info.cam && info.cam.active) ? info.cam : null;
+    info.cam = { active: true, video: prev ? prev.video : true, muted: prev ? prev.muted : false };
+    info.voice = { active: false, muted: false };
+    addTile(peerId, info.nick || nick, stream, false);
+    setTileFlags(peerId, info.cam);
+    startDetector(peerId, stream, function (sp) {
+      if (info.speaking !== sp) { info.speaking = sp; renderUsers(); }
+      setTileSpeaking(peerId, sp);
+    });
+    renderUsers();
+    sysMsg((info.nick || nick) + ' 开启了视频通话');
   }
 
   function attachAudio(peerId, stream) {
@@ -1424,7 +1673,8 @@
   function cleanup() {
     try { broadcast({ k: 'bye' }); } catch (e) { /* noop */ }
     stopShare();
-    if (S.voiceStream) stopVoice();
+    if (S.camStream) stopCam();
+    if (S.voiceStream) stopVoice(true);
     Object.keys(S.conns).forEach(function (id) {
       try { S.conns[id].conn.close(); } catch (e) { /* noop */ }
     });

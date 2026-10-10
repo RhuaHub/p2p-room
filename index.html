@@ -94,6 +94,8 @@
         <iframe id="stageFrame" allow="autoplay; fullscreen; encrypted-media" allowfullscreen scrolling="no" referrerpolicy="no-referrer"></iframe>
       </div>
 
+      <div id="videos"></div>
+
       <div id="msgs"></div>
 
       <footer>
@@ -107,6 +109,10 @@
             </button>
             <button class="tool" id="fileBtn" title="发送文件（图片 / 音视频 / Word / Excel / PPT / XMind 等）">
               <svg viewBox="0 0 24 24"><path d="M14 3v4.4a1 1 0 0 0 1 1H20"/><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M12 17v-6M9.5 14.5L12 17l2.5-2.5"/></svg>
+            </button>
+            <button class="tool" id="camBtn" title="开启 / 关闭摄像头视频通话">
+              <span class="badge"></span>
+              <svg viewBox="0 0 24 24"><path d="M13.8 8.6a3.3 3.3 0 1 1-6.6 0 3.3 3.3 0 0 1 6.6 0z"/><path d="M3.4 20c0-3.7 3-5.9 6.6-5.9s6.6 2.2 6.6 5.9"/><path d="M18.6 6.6h3.4v8h-3.4z"/></svg>
             </button>
             <button class="tool" id="micBtn" title="开启 / 关闭麦克风">
               <span class="badge"></span>
@@ -126,6 +132,7 @@
         <div class="hintbar">
           <span><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行</span>
           <span>📎 发送文件：图片/音视频/Word/Excel/PPT/XMind 实时预览</span>
+          <span>📹 摄像头按钮开启多人视频通话（P2P 直连）</span>
           <span>视频链接支持 mp4/webm/m3u8/m4a 等格式</span>
         </div>
       </footer>
