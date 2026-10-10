@@ -89,7 +89,7 @@ Workers & Pages → **Create** → **Pages** → **Connect to Git**，选中 `Rh
 
 自定义域名：域名已托管在 Cloudflare 时，在 Pages 项目 **Custom domains → Set up a custom domain** 直接添加，会自动写 DNS 并签发证书。
 
-根目录下的 `_headers` 提供安全响应头与 CSS/JS 一天缓存（手写站没有文件指纹，所以用 `must-revalidate` 而不是长缓存 `immutable`，否则改完样式用户会拿到旧文件）。`404.html` 会被自动用作未匹配路径的响应。
+根目录下的 `_headers` 提供安全响应头；CSS/JS 使用 `no-cache`（每次与 ETag 协商，Pages 自带 Etag，开销极小）——手写站没有文件指纹，任何长缓存都会在改版后让浏览器拿旧文件、出现新旧错配。`404.html` 会被自动用作未匹配路径的响应。
 
 ## 文件结构
 
