@@ -83,10 +83,12 @@
   }
 
   function colorOf(str) {
-    var h = 0;
+    var h0 = 0;
     str = String(str || 'x');
-    for (var i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360;
-    return 'linear-gradient(135deg,hsl(' + h + ' 62% 56%),hsl(' + ((h + 32) % 360) + ' 62% 48%))';
+    for (var i = 0; i < str.length; i++) h0 = (h0 * 31 + str.charCodeAt(i)) % 360;
+    // 暖金色系头像：色相锁定在 18°~58°（赤陶 → 琥珀 → 麦金），避免冷色串味
+    var h = 18 + (h0 % 41);
+    return 'linear-gradient(135deg,hsl(' + h + ' 58% 56%),hsl(' + ((h + 22) % 360) + ' 54% 45%))';
   }
 
   function fmtSize(b) {
