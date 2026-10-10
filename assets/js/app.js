@@ -53,7 +53,9 @@
   var IMG = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif'];
   var AUD = ['mp3', 'wav', 'ogg', 'oga', 'm4a', 'aac', 'flac', 'opus', 'weba'];
   var MOV = ['mp4', 'webm', 'ogv', 'm4v', 'mov', 'm3u8'];
-  var CHUNK = 16 * 1024;
+  // 64KB/片。实测 16KB 与 64KB 传 60MB 均为约 24s（~2.5MB/s），瓶颈在 SCTP 层；
+  // 但 64KB 让消息数减少 4 倍，CPU 与事件开销明显更低。
+  var CHUNK = 64 * 1024;
   var BIG_FILE = 50 * 1024 * 1024;
 
   /* ---------------- UI 工具 ---------------- */
@@ -377,6 +379,8 @@
         info.voice = { active: !!d.active, muted: !!d.muted };
         if (!d.active) info.speaking = false;
       }
+      // 对端主动关麦：MediaConnection 的 close 事件不保证送达，靠信令兜底回收音频元素
+      if (!d.active) { removeAudio(peerId); stopDetector(peerId); }
       renderUsers();
       return;
     }
@@ -385,7 +389,7 @@
         info.cam = { active: !!d.active, video: d.video !== false, muted: !!d.muted };
         if (!d.active) info.speaking = false;
       }
-      if (!d.active) removeTile(peerId);
+      if (!d.active) { removeTile(peerId); stopDetector(peerId); }
       else setTileFlags(peerId, info && info.cam);
       renderUsers();
       return;
@@ -1308,11 +1312,12 @@
         var off = 0;
         (function nextChunk() {
           if (off >= file.size) return nextPeer();
+          var start = off;
           var end = Math.min(off + CHUNK, file.size);
-          file.slice(off, end).arrayBuffer().then(function (buf) {
+          off = end;
+          file.slice(start, end).arrayBuffer().then(function (buf) {
             return drain(conn).then(function () {
-              send(conn, { k: 'chunk', fileId: fileId, i: (off / CHUNK) | 0, buf: buf });
-              off = end;
+              send(conn, { k: 'chunk', fileId: fileId, i: (start / CHUNK) | 0, buf: buf });
               nextChunk();
             });
           }).catch(rej);
