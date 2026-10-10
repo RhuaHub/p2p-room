@@ -67,12 +67,34 @@ node tools/e2e.js            # 需 Node 18+ 与本机 Edge / Chrome
 
 ## 部署
 
+### GitHub Pages
+
 推送到 `main` 分支后，在仓库 **Settings → Pages → Build and deployment** 选择 `Deploy from a branch` / `main` / `/ (root)` 即可上线。
+
+### Cloudflare Pages（推荐）
+
+Workers & Pages → **Create** → **Pages** → **Connect to Git**，选中 `RhuaHub/p2p-room` 后填：
+
+| 配置项 | 值 |
+| --- | --- |
+| Framework preset | `None` |
+| Build command | `mkdir -p dist && cp -r *.html assets _headers dist/` |
+| Build output directory | `dist` |
+
+构建命令把产物收进 `dist/`，避免 `tools/` 与 `README.md` 被公开访问；该命令与 Pages 构建容器行为一致，可在本机先跑一遍验证。
+
+首次连接需授权 Cloudflare 访问 GitHub 仓库（一次性）。绑定成功后每次 `git push` 自动重建，约 1 分钟生效。
+
+自定义域名：域名已托管在 Cloudflare 时，在 Pages 项目 **Custom domains → Set up a custom domain** 直接添加，会自动写 DNS 并签发证书。
+
+根目录下的 `_headers` 提供安全响应头与 CSS/JS 一天缓存（手写站没有文件指纹，所以用 `must-revalidate` 而不是长缓存 `immutable`，否则改完样式用户会拿到旧文件）。`404.html` 会被自动用作未匹配路径的响应。
 
 ## 文件结构
 
 ```
 index.html              页面结构
+404.html                未匹配路径的响应页（Pages/GitHub Pages 自动识别）
+_headers                Pages 响应头与缓存规则
 assets/css/style.css    样式（设计变量集中在 :root，当前为暖金主题）
 assets/js/app.js        全部逻辑（信令、聊天、文件、语音、视频通话、共享、预览）
 tools/e2e.js            端到端自动化测试（无头浏览器 + CDP，26 项）
