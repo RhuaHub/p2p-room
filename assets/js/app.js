@@ -201,36 +201,94 @@
     });
   };
 
-  /* ---------------- Peer 初始化 ---------------- */
+  /* ---------------- 网络配置：ICE / TURN / 信令 ---------------- */
+
+  // TURN 中继。纯 STUN 只能穿透普通 NAT；对称 NAT、部分蜂窝网、严格企业网下
+  // 打洞必然失败，表现是「一直连接中」。有 TURN 后这类环境可 100% 连通（流量经中继转发）。
+  // 填入方式见 README「接入 TURN」，留空则退化为纯 STUN 直连。
+  var TURN_LIST = [
+    // { urls: ['turn:turn.example.com:3478', 'turns:turn.example.com:5349?transport=tcp'],
+    //   username: 'your-user', credential: 'your-secret' }
+  ];
+
   var ICE = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:global.stun.twilio.com:3478' }
-    ],
-    sdpSemantics: 'unified-plan'
+    ].concat(TURN_LIST),
+    sdpSemantics: 'unified-plan',
+    iceCandidatePoolSize: 2
   };
-  var newPeer = function (id) { return new Peer(id, { debug: 1, config: ICE }); };
+  var HAS_TURN = TURN_LIST.length > 0;
+
+  // 信令服务器列表，按顺序尝试：前一个超时或不可用时自动切下一个。
+  // 默认只有 PeerJS 公共服务（无 SLA，它挂了全站无法建房）。
+  // URL 拼法为 /{path}{key}，所以公共服务是 path:'/' + key:'peerjs' => wss://0.peerjs.com/peerjs。
+  // 自建 PeerServer 后放第一位即可，公共的留作兜底；若服务端用
+  // ExpressPeerServer(app, { path: '/myapp' })，这里对应填 path: '/myapp/', key: 'peerjs'。
+  var SIGNALING = [
+    { host: '0.peerjs.com', port: 443, secure: true, path: '/', key: 'peerjs' }
+    // { host: 'peer.yourdomain.com', port: 443, secure: true, path: '/', key: 'peerjs' }
+  ];
+  var SIG_TIMEOUT = 9000;   // 单个信令服务器握手等待上限
+  var sigIndex = 0;
+
+  var newPeer = function (id) {
+    var s = SIGNALING[sigIndex] || SIGNALING[0];
+    return new Peer(id, {
+      debug: 1,
+      config: ICE,
+      host: s.host, port: s.port, secure: s.secure, path: s.path, key: s.key
+    });
+  };
   var genRoom = function () {
     return 'rm' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
   };
+
+  // 进房阶段盯着信令握手：超时说明这个服务器不可用，切下一个
+  function armSigWatch() {
+    clearTimeout(S.sigTimer);
+    // 只有在配置了备用信令时才做超时切换；单一服务器保持原有重试行为，避免误伤慢网络
+    if (S.entered || SIGNALING.length < 2) return;
+    S.sigTimer = setTimeout(function () {
+      if (S.entered) return;
+      if (sigIndex + 1 < SIGNALING.length) {
+        sigIndex++;
+        toast('主信令无响应，正在切换备用信令…', 'warn', 4000);
+        restartPeer();
+      } else {
+        gateErr('信令服务器无响应，请检查网络后重试');
+        $('#goBtn').classList.remove('busy');
+        $('#goBtn').disabled = false;
+      }
+    }, SIG_TIMEOUT);
+  }
+  function restartPeer() {
+    try { if (S.peer) S.peer.destroy(); } catch (e) { /* noop */ }
+    if (S.isHost) startHost(); else startGuest(S.joinRoom || S.roomId);
+  }
 
   function startHost() {
     S.isHost = true;
     S.roomId = genRoom();
     S.peer = newPeer(S.roomId);
     bindPeer();
+    armSigWatch();
   }
   function startGuest(room) {
     S.isHost = false;
     S.roomId = room;
+    S.joinRoom = room;          // 记住原始房间号，信令切换重试时不会丢
     S.peer = newPeer(undefined);
     bindPeer();
+    armSigWatch();
   }
 
   function bindPeer() {
     var p = S.peer;
     p.on('open', function (id) {
+      clearTimeout(S.sigTimer);
       S.myId = id;
       if (S.isHost) { S.roomId = id; enterRoom(); }
       else { S.roster[S.roomId] = 1; connectTo(S.roomId); }
@@ -245,6 +303,24 @@
     p.on('close', function () { setStatus('err', '已断开'); });
   }
 
+  // 监听 ICE 状态：直连失败时明确告诉用户是网络打洞问题，而不是干等
+  function watchICE(pc) {
+    if (!pc || pc.__iceWatched) return;
+    pc.__iceWatched = true;
+    pc.addEventListener('iceconnectionstatechange', function () {
+      var st = pc.iceConnectionState;
+      if (st === 'failed') {
+        setStatus('err', '直连失败');
+        toast(HAS_TURN
+          ? 'P2P 直连失败：TURN 中继也未能建立，请检查 TURN 服务配置'
+          : 'P2P 直连失败：当前网络打洞不通（对称 NAT / 企业网 / 部分蜂窝网），需要为站点配置 TURN 中继',
+          'err', 9000);
+      } else if (st === 'disconnected') {
+        setStatus('warn', '连接不稳定');
+      }
+    });
+  }
+
   function onPeerError(err) {
     var t = err && err.type || '';
     if (t === 'unavailable-id' && S.isHost && S.idRetry < 4) {
@@ -253,6 +329,15 @@
       try { S.peer.destroy(); } catch (e) { /* noop */ }
       S.peer = newPeer(S.roomId);
       bindPeer();
+      return;
+    }
+    // 信令级故障（连不上 / 服务端出错 / 证书问题）：还有备用服务器就切过去
+    if (!S.entered && /^(network|server-error|ssl-unavailable|socket-error|socket-closed)$/.test(t)
+        && sigIndex + 1 < SIGNALING.length) {
+      clearTimeout(S.sigTimer);
+      sigIndex++;
+      toast('主信令不可用，正在切换备用信令…', 'warn', 4000);
+      setTimeout(restartPeer, 300);
       return;
     }
     var map = {
@@ -282,8 +367,10 @@
 
   function setupConn(conn) {
     var opened = false;
+    watchICE(conn.peerConnection);
     conn.on('open', function () {
       opened = true;
+      watchICE(conn.peerConnection);
       if (!S.conns[conn.peer]) {
         S.conns[conn.peer] = {
           conn: conn,
@@ -799,6 +886,7 @@
     try {
       var call = S.peer.call(peerId, stream, { metadata: { kind: kind, nick: S.nick } });
       map[peerId] = call;
+      watchICE(call.peerConnection);
       call.on('close', function () { delete map[peerId]; });
       call.on('error', function () { delete map[peerId]; });
     } catch (e) { /* noop */ }
@@ -808,7 +896,9 @@
     var kind = (call.metadata && call.metadata.kind) || 'voice';
     var nick = (call.metadata && call.metadata.nick) || (S.conns[call.peer] || {}).nick || '成员';
     try { call.answer(); } catch (e) { return; }
+    watchICE(call.peerConnection);
     call.on('stream', function (stream) {
+      watchICE(call.peerConnection);
       if (kind === 'cam') attachCam(call.peer, stream, nick);
       else if (kind === 'voice') attachAudio(call.peer, stream);
       else showShare(call.peer, stream, nick);
@@ -1011,6 +1101,18 @@
     var prev = (info.cam && info.cam.active) ? info.cam : null;
     info.cam = { active: true, video: prev ? prev.video : true, muted: prev ? prev.muted : false };
     info.voice = { active: false, muted: false };
+    // PeerJS 1.5 基于 ontrack：音频轨与视频轨会各触发一次 'stream' 事件。
+    // 已挂载过就只补齐媒体流，不重建 DOM、不重复提示、不重复启动说话检测。
+    var tile = prev ? S.vTiles[peerId] : null;
+    if (prev && tile) {
+      var v = tile.querySelector('video');
+      if (v && v.srcObject !== stream) {
+        v.srcObject = stream;
+        var pr = v.play();
+        if (pr && pr.catch) pr.catch(function () { /* 自动播放被拦截时不打扰 */ });
+      }
+      return;
+    }
     addTile(peerId, info.nick || nick, stream, false);
     setTileFlags(peerId, info.cam);
     startDetector(peerId, stream, function (sp) {

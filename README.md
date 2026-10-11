@@ -29,10 +29,10 @@
 
 ## 技术说明
 
-- **信令**：PeerJS 公共服务器（`0.peerjs.com`），仅用于握手，多 CDN 兜底加载
+- **信令**：默认 PeerJS 公共服务器（`0.peerjs.com`），仅用于握手；支持多服务器按序自动切换，配置见「网络配置」
 - **传输**：`RTCDataChannel` 传消息与文件分片，`RTCPeerConnection` 传音视频流
 - **拓扑**：全网状 mesh —— 房主 Peer ID 即房间号，房主在收到 `hello` 后下发在线成员列表，新成员与所有已在线成员逐一建立直连
-- **ICE**：使用 Google / Twilio 公共 STUN
+- **ICE**：默认 Google / Twilio 公共 STUN；`TURN_LIST` 填入任意 TURN 即自动生效，配置见「网络配置」
 
 协议消息统一用 `k` 字段区分：`hello` / `peers` / `voice` / `cam` / `stage` / `stageClose` / `sync` / `bye` / `recall` / `msg` / `file` / `chunk` / `fdone` / `faccept`。
 
@@ -59,9 +59,9 @@ node tools/e2e.js            # 需 Node 18+ 与本机 Edge / Chrome
 
 ## 已知限制
 
-- **公共信令不稳定**：PeerJS 官方公共云不保证可用性，高峰可能握手失败（实测出现过整轮建房超时，稍后重试即恢复）。生产环境请自建 `peerjs-server`。
+- **公共信令无 SLA**：PeerJS 官方公共云不保证可用性，高峰可能握手失败（实测出现过整轮建房超时）。代码已支持多信令自动切换，在 `assets/js/app.js` 顶部 `SIGNALING` 加一行自建地址即可，见「网络配置」。
 - **传输速率**：端到端约 2.5MB/s（60MB 文件约 24s），瓶颈在 SCTP 层，调大分片无明显提升。
-- **无 TURN 中继**：对称型 NAT 或严格防火墙下打洞会失败，需自建 coturn 并配置 `iceServers`。
+- **默认无 TURN 中继**：默认只配公共 STUN。对称型 NAT 或严格防火墙下打洞会失败，此时界面会明确提示需要 TURN，填入 `TURN_LIST` 即可，见「网络配置」。
 - **房间无持久化**：房主断开后房间即失效，不保存任何历史消息。
 - **人数上限**：mesh 拓扑下每人需与其余所有人建立连接。纯聊天建议 ≤ 6 人；开视频通话时建议 ≤ 4 人（每路 640×480 约占 0.5–1 Mbps 上行，4 人房间单人上行约 3 Mbps）。更多人数应改 SFU 架构。
 
@@ -90,6 +90,52 @@ Workers & Pages → **Create** → **Pages** → **Connect to Git**，选中 `Rh
 自定义域名：域名已托管在 Cloudflare 时，在 Pages 项目 **Custom domains → Set up a custom domain** 直接添加，会自动写 DNS 并签发证书。
 
 根目录下的 `_headers` 提供安全响应头；CSS/JS 使用 `no-cache`（每次与 ETag 协商，Pages 自带 Etag，开销极小）——手写站没有文件指纹，任何长缓存都会在改版后让浏览器拿旧文件、出现新旧错配。`404.html` 会被自动用作未匹配路径的响应。
+
+## 网络配置
+
+信令与 ICE 两处配置都集中在 `assets/js/app.js` 顶部，改完刷新即可生效，无需构建。
+
+### 接入 TURN 中继
+
+**为什么需要**：STUN 只能穿透普通 NAT。对称 NAT、部分蜂窝网络、严格企业网下打洞必然失败，表现为双方一直卡在「连接中」。TURN 通过服务器转发兜底，可让这类环境 100% 连通，代价是流量不再端到端。
+
+填入 `TURN_LIST`（留空即维持纯 STUN 直连）：
+
+```js
+var TURN_LIST = [
+  { urls: ['turn:turn.example.com:3478', 'turns:turn.example.com:5349?transport=tcp'],
+    username: 'your-user', credential: 'your-secret' }
+];
+```
+
+凭据来源：
+
+- **自建 coturn**（推荐，完全可控）：`apt install coturn`，配 `static-auth-secret`，用 [RFC 7635 临时凭据](https://datatracker.ietf.org/doc/html/rfc7635) 生成 username/credential。
+- **托管服务**：Cloudflare Calls TURN、Metered、Twilio 等，按流量计费。
+
+> **注意**：前端里的凭据任何人都能看到。务必使用**临时凭据**（有过期时间）并配置**域名白名单**，否则 TURN 会被盗刷，产生高额流量账单。
+
+### 自建信令服务器
+
+公共服务没有 SLA，它一挂全站就建不了房。自建后把它放在 `SIGNALING` 第一位，公共的留作兜底：**主服务器握手超过 9 秒未响应，或返回 `network` / `server-error` 类错误时，会自动切到下一个。**
+
+```js
+var SIGNALING = [
+  { host: 'peer.yourdomain.com', port: 443, secure: true, path: '/', key: 'peerjs' },
+  { host: '0.peerjs.com', port: 443, secure: true, path: '/', key: 'peerjs' }
+];
+```
+
+URL 拼法为 `/{path}{key}` —— 上面第一项对应 `wss://peer.yourdomain.com/peerjs`。若服务端用 `ExpressPeerServer(app, { path: '/myapp' })`，这里对应填 `path: '/myapp/'`（结尾斜杠不能少）。
+
+只配一个服务器时不做超时切换，保持 PeerJS 原生重试行为，避免误伤慢网络用户。
+
+`tools/peer-server.js` 是一份可直接运行的自建服务端示例：
+
+```bash
+npm i express peer
+node tools/peer-server.js        # 默认监听 9000，通过环境变量 PORT 修改
+```
 
 ## 文件结构
 
