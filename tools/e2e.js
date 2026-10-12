@@ -121,7 +121,7 @@ async function waitFor(cdp, expr, label, timeout) {
   await T('A 创建房间并进入', async () => {
     await A.ev(`window.confirm=()=>true;document.querySelector('#nick').value='A房主';document.querySelector('#goBtn').click();'ok'`);
     await waitFor(A, `document.querySelector('#app').classList.contains('on')`, 'A 进入主界面', 30000);
-    room = await waitFor(A, `(function(){var t=document.querySelector('#roomId').textContent.trim();return /^\\d{4}$/.test(t)?t:null})()`, '房间号生成', 30000);
+    room = await waitFor(A, `(function(){var t=document.querySelector('#roomId').textContent.trim();return /^\\d{6}$/.test(t)?t:null})()`, '房间号生成', 30000);
     return '房间号=' + room;
   });
   await T('B 用房间号加入', async () => {
