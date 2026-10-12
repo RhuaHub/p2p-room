@@ -190,7 +190,9 @@
     var nick = $('#nick').value.trim();
     if (!nick) { gateErr('请先输入昵称'); $('#nick').focus(); return; }
     var room = $('#roomIn').value.trim();
-    if (gateMode === 'join' && !room) { gateErr('请输入要加入的房间号'); $('#roomIn').focus(); return; }
+    if (gateMode === 'join') {
+      if (!/^\d{4}$/.test(room)) { gateErr('请输入 4 位数字房间号'); $('#roomIn').focus(); return; }
+    }
     S.nick = nick;
     $('#gateErr').classList.remove('show');
     $('#goBtn').classList.add('busy');
@@ -242,8 +244,10 @@
       host: s.host, port: s.port, secure: s.secure, path: s.path, key: s.key
     });
   };
+  // 房间号改为纯 4 位数字（1000–9999），好记好分享。
+  // 4 位数字空间有限，公共信令下偶发撞号，onPeerError 里会自动重试换号。
   var genRoom = function () {
-    return 'rm' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
+    return String(Math.floor(Math.random() * 9000) + 1000);
   };
 
   // 进房阶段盯着信令握手：超时说明这个服务器不可用，切下一个
@@ -323,7 +327,8 @@
 
   function onPeerError(err) {
     var t = err && err.type || '';
-    if (t === 'unavailable-id' && S.isHost && S.idRetry < 4) {
+    // 4 位数字空间小，撞号概率比原长随机号高，放宽重试上限直到拿到可用房间
+    if (t === 'unavailable-id' && S.isHost && S.idRetry < 30) {
       S.idRetry++;
       S.roomId = genRoom();
       try { S.peer.destroy(); } catch (e) { /* noop */ }
@@ -1806,10 +1811,11 @@
     if (!window.isSecureContext) {
       toast('非安全上下文（建议 https 或 localhost），麦克风可能不可用', 'warn', 6500);
     }
-    var q = new URLSearchParams(location.search).get('room') || location.hash.replace(/^#/, '');
-    if (q) {
+    var q = (new URLSearchParams(location.search).get('room') || location.hash.replace(/^#/, '')).trim();
+    // 仅当链接里的房间号是合法的 4 位数字时才自动填入选房（旧 rm... 链接不再识别）
+    if (/^\d{4}$/.test(q)) {
       $('#modeJoin').click();
-      $('#roomIn').value = q.trim();
+      $('#roomIn').value = q;
       $('#nick').focus();
     }
   })();
