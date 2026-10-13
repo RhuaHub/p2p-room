@@ -194,7 +194,8 @@
     merged: false,
     winner: null,
     landlordWin: false,
-    sel: {}          // 选中的牌 id
+    sel: {},         // 选中的牌 id
+    hands: {}        // 房主视角：id -> 该玩家的完整手牌（用于刷新后恢复并重发）
   };
 
   function myId() { return S.myId; }
@@ -208,6 +209,7 @@
   function hostDeal() {
     var ids = [S.myId].concat(Object.keys(S.conns));
     if (ids.length !== 3) { P2P.toast('需要 3 人才能开局', 'warn', 3000); return; }
+    clearGame();
     var seats = ids.map(function (id, i) {
       return { id: id, nick: id === S.myId ? S.nick : (S.conns[id] ? S.conns[id].nick : '成员'), seat: i };
     });
@@ -215,6 +217,7 @@
     var deck = shuffle(buildDeck());
     var hands = {};
     for (var i = 0; i < 3; i++) hands[ids[i]] = deck.slice(i * 17, i * 17 + 17);
+    G.hands = hands;
     G._pendingBottom = deck.slice(51, 54);
     ids.forEach(function (id, i) {
       if (id === S.myId) { G.hand = sortHand(hands[id].slice()); }
@@ -227,6 +230,7 @@
     G.bidOrder = seats.map(function (s) { return s.id; });
     G.bidIdx = 0;
     G.turn = G.bidOrder[0];
+    G._dealAnim = true;   // 触发发牌 3D 入场动画
     broadcastState('发牌完成，开始叫地主');
   }
 
@@ -252,15 +256,26 @@
     G.turn = landlord;
     G.table = null; G.lastPlayer = null; G.passCount = 0;
     G.counts[landlord] = 20;
-    if (landlord === S.myId) { G.hand = sortHand(G.hand.concat(G._pendingBottom)); G.merged = true; }
-    else { P2P.sendTo(landlord, { k: 'ddz_landlord', bottom: G._pendingBottom }); }
+    if (landlord === S.myId) {
+      G.hand = sortHand(G.hand.concat(G._pendingBottom));
+      G.hands[landlord] = G.hand.slice();
+      G.merged = true;
+    } else {
+      if (G.hands[landlord]) G.hands[landlord] = G.hands[landlord].concat(G._pendingBottom);
+      P2P.sendTo(landlord, { k: 'ddz_landlord', bottom: G._pendingBottom });
+    }
     G.bottom = G._pendingBottom;
     broadcastState(nickOf(landlord) + ' 成为地主（' + max + '分）');
   }
 
   /* ---------------- 房主：出牌 / 过牌 ---------------- */
   function applyPlay(playerId, cards) {
-    if (playerId === S.myId) G.hand = G.hand.filter(function (c) { return !cards.some(function (x) { return x.id === c.id; }); });
+    if (playerId === S.myId) {
+      G.hand = G.hand.filter(function (c) { return !cards.some(function (x) { return x.id === c.id; }); });
+      if (G.hands[playerId]) G.hands[playerId] = G.hand.slice();
+    } else if (G.hands[playerId]) {
+      G.hands[playerId] = G.hands[playerId].filter(function (c) { return !cards.some(function (x) { return x.id === c.id; }); });
+    }
     G.counts[playerId] -= cards.length;
     G.table = {
       from: playerId,
@@ -309,8 +324,8 @@
   }
 
   /* ---------------- 公共状态广播 ---------------- */
-  function broadcastState(msg) {
-    var st = {
+  function buildState(msg) {
+    return {
       k: 'ddz_state',
       phase: G.phase,
       seats: G.seats,
@@ -321,8 +336,46 @@
       bottom: G.phase === 'bid' ? null : G.bottom,
       msg: msg || ''
     };
+  }
+  function broadcastState(msg) {
+    var st = buildState(msg);
     applyState(st);          // 房主自身也应用
     P2P.broadcast(st);       // 广播给其余两家
+    if (isHost()) persistGame();  // 房主侧落盘，供刷新后恢复
+  }
+
+  /* ---------------- 房主状态持久化（刷新自愈） ---------------- */
+  function ddzKey() {
+    var room = (S.roomId || '').toString();
+    return /^\d{6}$/.test(room) ? 'rhua_ddz_' + room : null;
+  }
+  function persistGame() {
+    var key = ddzKey(); if (!key) return;
+    try {
+      localStorage.setItem(key, JSON.stringify({
+        ts: Date.now(),
+        phase: G.phase, seats: G.seats, landlord: G.landlord, turn: G.turn,
+        table: G.table, counts: G.counts, bottom: G.bottom,
+        bids: G.bids, bidOrder: G.bidOrder, bidIdx: G.bidIdx,
+        lastPlayer: G.lastPlayer, passCount: G.passCount, merged: G.merged,
+        winner: G.winner, landlordWin: G.landlordWin,
+        pendingBottom: G._pendingBottom, hands: G.hands
+      }));
+    } catch (e) { /* noop */ }
+  }
+  function loadGame() {
+    var key = ddzKey(); if (!key) return null;
+    try {
+      var raw = localStorage.getItem(key);
+      if (!raw) return null;
+      var s = JSON.parse(raw);
+      if (!s || !s.phase || s.phase === 'idle') return null;
+      return s;
+    } catch (e) { return null; }
+  }
+  function clearGame() {
+    var key = ddzKey(); if (!key) return;
+    try { localStorage.removeItem(key); } catch (e) { /* noop */ }
   }
 
   /* ---------------- 客户端：应用状态 ---------------- */
@@ -359,6 +412,7 @@
         G.hand = sortHand(d.hand.slice());
         G.phase = 'bid'; G.landlord = null; G.table = null; G.merged = false; G.sel = {};
         G.counts = {}; d.seats.forEach(function (s) { G.counts[s.id] = 17; });
+        G._dealAnim = true;   // 触发发牌 3D 入场动画
         renderAll();
         break;
       case 'ddz_landlord':
@@ -366,6 +420,10 @@
         break;
       case 'ddz_state':
         applyState(d);
+        break;
+      case 'ddz_resync':
+        // 房主刷新恢复后，把该客户端自己的完整手牌重新下发
+        if (d.hand && d.hand.length) { G.hand = sortHand(d.hand.slice()); G.sel = {}; renderAll(); }
         break;
       case 'ddz_err':
         P2P.toast(d.msg || '出牌无效', 'warn', 2200);
@@ -377,8 +435,17 @@
   function onHello(peerId) {
     if (!isHost()) return;
     var total = 1 + Object.keys(S.conns).length;
-    if (G.phase === 'idle' && total >= 3) { hostDeal(); }
-    else if (G.phase !== 'idle' && total > 3) { P2P.sendTo(peerId, { k: 'ddz_err', msg: '房间已满（斗地主 3 人）' }); }
+    if (G.phase === 'idle') {
+      if (total >= 3) hostDeal();
+      return;
+    }
+    // 进行中 / 已结束：来的是重连的客户端，把当前整局状态 + 其手牌重发回去
+    if (G.hands[peerId]) {
+      P2P.sendTo(peerId, buildState(nickOf(peerId) + ' 已重新连上，状态已同步'));
+      P2P.sendTo(peerId, { k: 'ddz_resync', hand: G.hands[peerId] });
+    } else if (total > 3) {
+      P2P.sendTo(peerId, { k: 'ddz_err', msg: '房间已满（斗地主 3 人）' });
+    }
   }
   function onPeerLeft(peerId) {
     if (isHost() && G.phase !== 'idle' && G.phase !== 'over') {
@@ -393,7 +460,23 @@
     // 默认收起聊天浮窗，保证牌桌完整可见；点「💬 聊天」再让聊天浮现
     var ddz = document.getElementById('ddz');
     if (ddz) ddz.style.display = 'flex';
-    G.phase = 'idle'; G.hand = []; G.merged = false; G.sel = {}; G._pending = null;
+    if (isHost()) {
+      // 房主刷新后：若本地有未结束的整局快照，直接恢复并等待客户端重连同步
+      var snap = loadGame();
+      if (snap) {
+        G.phase = snap.phase; G.seats = snap.seats || []; G.landlord = snap.landlord;
+        G.turn = snap.turn; G.table = snap.table; G.counts = snap.counts || {};
+        G.bottom = snap.bottom; G.bids = snap.bids || {}; G.bidOrder = snap.bidOrder || [];
+        G.bidIdx = snap.bidIdx || 0; G.lastPlayer = snap.lastPlayer; G.passCount = snap.passCount || 0;
+        G.merged = !!snap.merged; G.winner = snap.winner; G.landlordWin = !!snap.landlordWin;
+        G._pendingBottom = snap.pendingBottom; G.hands = snap.hands || {};
+        G.hand = (G.hands[S.myId] ? sortHand(G.hands[S.myId].slice()) : []);
+        G.sel = {}; G._pending = null;
+        renderAll();
+        return;
+      }
+    }
+    G.phase = 'idle'; G.hand = []; G.merged = false; G.sel = {}; G._pending = null; G.hands = {};
     renderAll();
   }
 
@@ -495,12 +578,17 @@
   function renderHand() {
     var el = document.getElementById('ddzHand');
     if (!el) return;
-    if (G.phase === 'idle') { el.innerHTML = ''; return; }
+    if (G.phase === 'idle') { el.innerHTML = ''; el.classList.remove('dealing'); return; }
     el.innerHTML = G.hand.map(function (c) {
       var cls = 'card' + (c.red ? ' red' : '') + (c.r >= 16 ? ' joker' : '') + (G.sel[c.id] ? ' sel' : '');
       if (c.r >= 16) return '<div class="' + cls + '" data-id="' + c.id + '"><span class="jtxt">' + c.label + '</span></div>';
       return '<div class="' + cls + '" data-id="' + c.id + '"><span class="rk">' + c.label + '</span><span class="st">' + c.suit + '</span></div>';
     }).join('');
+    if (G._dealAnim) {
+      G._dealAnim = false;
+      el.classList.add('dealing');
+      setTimeout(function () { el.classList.remove('dealing'); }, 460);
+    }
   }
 
   function renderActs() {

@@ -195,23 +195,52 @@
   $('#nick').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('#goBtn').click(); });
   $('#roomIn').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('#goBtn').click(); });
 
-  $('#goBtn').onclick = function () {
-    var nick = $('#nick').value.trim();
+  /* ---------------- 会话持久化（刷新自动重进房间） ---------------- */
+  var SESS_KEY = 'rhua_sess';
+  function saveSession(o) {
+    try { localStorage.setItem(SESS_KEY, JSON.stringify({ ts: Date.now(), nick: o.nick, game: o.game, room: o.room, role: o.role })); } catch (e) { /* noop */ }
+  }
+  function clearSession() {
+    try { localStorage.removeItem(SESS_KEY); } catch (e) { /* noop */ }
+  }
+  function loadSession() {
+    try {
+      var s = JSON.parse(localStorage.getItem(SESS_KEY) || 'null');
+      if (s && s.room && /^\d{6}$/.test(s.room) && Date.now() - (s.ts || 0) < 7 * 864e5) return s;
+    } catch (e) { /* noop */ }
+    return null;
+  }
+  // 每台浏览器在每个房间里有一个稳定的客户端 ID，保证刷新后仍能对上之前的座位 / 手牌
+  function getUuid() {
+    try {
+      var v = localStorage.getItem('rhua_uuid');
+      if (!v) { v = Math.random().toString(36).slice(2, 10) + Date.now().toString(36); localStorage.setItem('rhua_uuid', v); }
+      return v;
+    } catch (e) { return Math.random().toString(36).slice(2, 12); }
+  }
+
+  function doEnter(opts) {
+    opts = opts || {};
+    var nick = (opts.nick != null ? opts.nick : $('#nick').value).trim();
     if (!nick) { gateErr('请先输入昵称'); $('#nick').focus(); return; }
-    var room = $('#roomIn').value.trim();
-    if (gateMode === 'join') {
-      if (!/^\d{6}$/.test(room)) { gateErr('请输入 6 位数字房间号'); $('#roomIn').focus(); return; }
-    }
+    var isJoin = (opts.mode != null ? opts.mode === 'join' : gateMode === 'join');
+    var room = (opts.room != null ? String(opts.room) : $('#roomIn').value).trim();
+    if (isJoin && !/^\d{6}$/.test(room)) { gateErr('请输入 6 位数字房间号'); $('#roomIn').focus(); return; }
     S.nick = nick;
-    S.game = gameMode;
+    S.game = opts.game || gameMode;
     $('#gateErr').classList.remove('show');
     $('#goBtn').classList.add('busy');
     $('#goBtn').disabled = true;
     ensurePeer().then(function (ok) {
-      if (!ok) { gateErr('WebRTC 依赖加载失败，请检查网络或稍后重试'); return; }
-      if (gateMode === 'create') startHost(); else startGuest(room);
+      if (!ok) {
+        gateErr('WebRTC 依赖加载失败，请检查网络或稍后重试');
+        $('#goBtn').classList.remove('busy'); $('#goBtn').disabled = false;
+        return;
+      }
+      if (isJoin) startGuest(room); else startHost(opts.room);
     });
-  };
+  }
+  $('#goBtn').onclick = function () { doEnter({}); };
 
   /* ---------------- 网络配置：ICE / TURN / 信令 ---------------- */
 
@@ -280,21 +309,28 @@
   }
   function restartPeer() {
     try { if (S.peer) S.peer.destroy(); } catch (e) { /* noop */ }
-    if (S.isHost) startHost(); else startGuest(S.joinRoom || S.roomId);
+    if (S.isHost) startHost(S.roomId); else startGuest(S.joinRoom || S.roomId);
   }
 
-  function startHost() {
+  // savedRoom 用于「刷新后自动重进」：房主复用同一房间号作为 PeerJS ID，
+  // 这样客户端（连到房间号）在房主刷新后能重新对上并自愈重连。
+  function startHost(savedRoom) {
     S.isHost = true;
-    S.roomId = genRoom();
+    S.idRetry = 0;
+    S.roomId = (savedRoom && /^\d{6}$/.test(String(savedRoom))) ? String(savedRoom) : genRoom();
+    S._idBase = S.roomId;     // 房主 PeerJS ID 即房间号，刷新后复用，客户端才能对上
     S.peer = newPeer(S.roomId);
     bindPeer();
     armSigWatch();
   }
   function startGuest(room) {
     S.isHost = false;
-    S.roomId = room;
+    S.idRetry = 0;
+    S.roomId = room;            // 房主 PeerJS ID = 房间号，用于 connectTo
     S.joinRoom = room;          // 记住原始房间号，信令切换重试时不会丢
-    S.peer = newPeer(undefined);
+    // 客户端 PeerJS ID 也做成稳定的（房间号 + 本机 uuid），刷新后座位 / 手牌才能对上
+    S._idBase = 'rhua-' + room + '-' + getUuid();
+    S.peer = newPeer(S._idBase);
     bindPeer();
     armSigWatch();
   }
@@ -337,14 +373,19 @@
 
   function onPeerError(err) {
     var t = err && err.type || '';
-    // 4 位数字空间小，撞号概率比原长随机号高，放宽重试上限直到拿到可用房间
-    if (t === 'unavailable-id' && S.isHost && S.idRetry < 30) {
-      S.idRetry++;
-      S.roomId = genRoom();
-      try { S.peer.destroy(); } catch (e) { /* noop */ }
-      S.peer = newPeer(S.roomId);
-      bindPeer();
-      return;
+    // 房间号 / 客户端 ID 暂被占用（多为刷新瞬间旧连接未释放）：复用同一 ID 短暂重试，
+    // 不要换房间号，否则客户端（连到房间号）会失联。
+    if (t === 'unavailable-id') {
+      if (S.idRetry < 40) {
+        S.idRetry++;
+        setStatus('warn', '标识暂被占用，正在重试…');
+        setTimeout(function () {
+          try { if (S.peer) S.peer.destroy(); } catch (e) { /* noop */ }
+          S.peer = newPeer(S._idBase);
+          bindPeer();
+        }, 700);
+        return;
+      }
     }
     // 信令级故障（连不上 / 服务端出错 / 证书问题）：还有备用服务器就切过去
     if (!S.entered && /^(network|server-error|ssl-unavailable|socket-error|socket-closed)$/.test(t)
@@ -429,6 +470,8 @@
     setTimeout(function () { $('#gate').style.display = 'none'; }, 460);
     $('#app').classList.add('on');
     if (S.game === 'ddz' && window.DDZ) window.DDZ.onEnter();
+    // 记录会话，刷新后可在 boot 阶段自动重进同一房间
+    saveSession({ nick: S.nick, game: S.game, room: S.roomId, role: S.isHost ? 'host' : 'guest' });
     setStatus('ok', S.isHost ? '房间已就绪' : '已连接');
     renderUsers();
     sysMsg(S.isHost ? '房间创建成功，把房间号分享给朋友即可开始' : '已加入房间');
@@ -451,6 +494,23 @@
     renderUsers();
     if (!Object.keys(S.conns).length) setStatus('warn', '房间内仅你一人');
     if (S.game === 'ddz' && window.DDZ) window.DDZ.onPeerLeft(peerId);
+    // 客户端失去房主连接（房主刷新 / 断线）：自动重试重连，避免被弹回入口页
+    if (!S.isHost && peerId === S.roomId) scheduleReconnect();
+  }
+
+  // 客户端自愈：房主掉线后周期性尝试重连（房主刷新后会以同一房间号重新上线）
+  var _reconnTimer = null;
+  function scheduleReconnect() {
+    if (S.isHost || !S.roomId) return;
+    setStatus('warn', '房主掉线，重连中…');
+    toast('与房主断开，正在尝试重连…', 'warn', 3000);
+    clearInterval(_reconnTimer);
+    var tries = 0;
+    _reconnTimer = setInterval(function () {
+      if (S.conns[S.roomId]) { clearInterval(_reconnTimer); _reconnTimer = null; setStatus('ok', '已重连'); toast('已重新连上房主', 'ok', 2200); return; }
+      if (++tries > 24) { clearInterval(_reconnTimer); _reconnTimer = null; toast('重连失败，请刷新页面或重新加入房间', 'err', 6000); return; }
+      connectTo(S.roomId);
+    }, 2500);
   }
   function closeCall(map, peerId) {
     var c = map[peerId];
@@ -1798,6 +1858,7 @@
   $('#copyBtn').onclick = function () { copyText(S.roomId || ''); };
   $('#leaveBtn').onclick = function () {
     if (!confirm('确定离开房间？当前连接将全部断开。')) return;
+    clearSession();
     cleanup();
     location.reload();
   };
@@ -1843,6 +1904,21 @@
       $('#modeJoin').click();
       $('#roomIn').value = q;
       $('#nick').focus();
+    }
+    // 刷新自动重进：若存在近期会话，直接用上次的昵称/玩法/房间号重新进入，
+    // 不再弹回入口页（房主复用同一房间号，客户端断线后也能自愈重连）。
+    var sess = loadSession();
+    if (sess) {
+      $('#nick').value = sess.nick || '';
+      var gBtn = document.querySelector('#gameSeg button[data-game="' + (sess.game || 'chat') + '"]');
+      if (gBtn) gBtn.click();
+      if (sess.role === 'host') {
+        doEnter({ nick: sess.nick, game: sess.game, mode: 'create', room: sess.room });
+      } else {
+        $('#modeJoin').click();
+        $('#roomIn').value = sess.room;
+        doEnter({ nick: sess.nick, game: sess.game, mode: 'join', room: sess.room });
+      }
     }
   })();
 })();
