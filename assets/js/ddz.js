@@ -388,9 +388,7 @@
   }
   /* ---------------- 进入房间 ---------------- */
   function onEnter() {
-    var app = document.getElementById('app');
-    app.classList.add('ddz-mode');
-    // 默认收起聊天浮窗，保证牌桌完整可见；点「💬 聊天」再让聊天浮现
+    document.getElementById('app').classList.add('ddz-mode');
     var ddz = document.getElementById('ddz');
     if (ddz) ddz.style.display = 'flex';
     G.phase = 'idle'; G.hand = []; G.merged = false; G.sel = {}; G._pending = null;
@@ -549,17 +547,6 @@
       else if (act === 'bid') doBid(parseInt(b.dataset.v, 10));
       else if (act === 'restart') doRestart();
     });
-    // 聊天浮窗：牌桌上的「💬 聊天」按钮切换浮现 / 收起
-    var tog = document.getElementById('ddzChatToggle');
-    if (tog) tog.onclick = function () {
-      var app = document.getElementById('app');
-      if (app.classList.contains('chat-open')) app.classList.remove('chat-open');
-      else app.classList.add('chat-open');
-    };
-    var cfClose = document.getElementById('cfClose');
-    if (cfClose) cfClose.onclick = function () {
-      document.getElementById('app').classList.remove('chat-open');
-    };
   }
 
   // 暴露给 app.js 的钩子
