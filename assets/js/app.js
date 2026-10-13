@@ -173,22 +173,13 @@
 
   /* ---------------- 入口面板 ---------------- */
   var gateMode = 'create';
-  var gameMode = 'chat';
-  $$('#modeSeg button').forEach(function (b) {
+  $$('.seg button').forEach(function (b) {
     b.onclick = function () {
-      $$('#modeSeg button').forEach(function (x) { x.classList.remove('on'); });
+      $$('.seg button').forEach(function (x) { x.classList.remove('on'); });
       b.classList.add('on');
       gateMode = b.dataset.mode;
       $('#joinField').style.display = gateMode === 'join' ? '' : 'none';
       $('#goBtn .tx').textContent = gateMode === 'join' ? '加入房间' : '创建房间并进入';
-      $('#gateErr').classList.remove('show');
-    };
-  });
-  $$('#gameSeg button').forEach(function (b) {
-    b.onclick = function () {
-      $$('#gameSeg button').forEach(function (x) { x.classList.remove('on'); });
-      b.classList.add('on');
-      gameMode = b.dataset.game;
       $('#gateErr').classList.remove('show');
     };
   });
@@ -203,7 +194,6 @@
       if (!/^\d{6}$/.test(room)) { gateErr('请输入 6 位数字房间号'); $('#roomIn').focus(); return; }
     }
     S.nick = nick;
-    S.game = gameMode;
     $('#gateErr').classList.remove('show');
     $('#goBtn').classList.add('busy');
     $('#goBtn').disabled = true;
@@ -428,7 +418,6 @@
     $('#gate').classList.add('hide');
     setTimeout(function () { $('#gate').style.display = 'none'; }, 460);
     $('#app').classList.add('on');
-    if (S.game === 'ddz' && window.DDZ) window.DDZ.onEnter();
     setStatus('ok', S.isHost ? '房间已就绪' : '已连接');
     renderUsers();
     sysMsg(S.isHost ? '房间创建成功，把房间号分享给朋友即可开始' : '已加入房间');
@@ -450,7 +439,6 @@
     if (!silent) sysMsg(info.nick + ' 离开了房间');
     renderUsers();
     if (!Object.keys(S.conns).length) setStatus('warn', '房间内仅你一人');
-    if (S.game === 'ddz' && window.DDZ) window.DDZ.onPeerLeft(peerId);
   }
   function closeCall(map, peerId) {
     var c = map[peerId];
@@ -459,10 +447,6 @@
 
   function onData(peerId, d) {
     if (!d || typeof d !== 'object') return;
-    if (d.k && typeof d.k === 'string' && d.k.indexOf('ddz_') === 0) {
-      if (window.DDZ) window.DDZ.handle(peerId, d);
-      return;
-    }
     var info = S.conns[peerId];
 
     if (d.k === 'hello') {
@@ -476,7 +460,6 @@
       if (S.roster[peerId]) delete S.roster[peerId];
       else sysMsg((d.nick || '成员') + ' 加入了房间');
       renderUsers();
-      if (S.game === 'ddz' && S.isHost && window.DDZ) window.DDZ.onHello(peerId);
       return;
     }
     if (d.k === 'peers') {
@@ -1820,15 +1803,6 @@
   $('#mask').onclick = function () {
     $('#aside').classList.remove('on');
     $('#mask').classList.remove('on');
-  };
-
-  // 暴露给斗地主模块（独立文件 ddz.js）的桥接接口：发牌/广播/状态/提示
-  window.P2P = {
-    S: S,
-    sendTo: function (id, obj) { var c = S.conns[id]; if (c && c.conn) send(c.conn, obj); },
-    broadcast: broadcast,
-    toast: toast,
-    sysMsg: sysMsg
   };
 
   /* ---------------- 启动 ---------------- */

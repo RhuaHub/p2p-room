@@ -9,7 +9,6 @@
 <link rel="icon" type="image/png" href="assets/img/favicon.png">
 <link rel="apple-touch-icon" href="assets/img/favicon.png">
 <link rel="stylesheet" href="assets/css/style.css">
-<link rel="stylesheet" href="assets/css/ddz.css">
 </head>
 <body>
 
@@ -24,17 +23,12 @@
       </div>
     </div>
 
-    <div class="seg" id="gameSeg">
-      <button id="gameChat" class="on" data-game="chat">聊天室</button>
-      <button id="gameDdz" data-game="ddz">斗地主</button>
-    </div>
-
     <div class="field">
       <label for="nick">你的昵称</label>
       <input id="nick" class="ipt" maxlength="16" placeholder="输入一个昵称，例如 小明" autocomplete="off">
     </div>
 
-    <div class="seg" id="modeSeg">
+    <div class="seg">
       <button id="modeCreate" class="on" data-mode="create">创建房间</button>
       <button id="modeJoin" data-mode="join">加入房间</button>
     </div>
@@ -143,39 +137,6 @@
       </footer>
     </div>
   </main>
-
-  <section id="ddz" class="ddz">
-    <div class="ddz-seats">
-      <div class="ddz-seat" id="seat1">
-        <div class="ds-crown">👑</div>
-        <div class="ds-avatar">🤖</div>
-        <div class="ds-name">—</div>
-        <div class="ds-cnt">0 张</div>
-        <div class="ds-last" id="seat1Last"></div>
-      </div>
-      <div class="ddz-seat" id="seat2">
-        <div class="ds-crown">👑</div>
-        <div class="ds-avatar">🤖</div>
-        <div class="ds-name">—</div>
-        <div class="ds-cnt">0 张</div>
-        <div class="ds-last" id="seat2Last"></div>
-      </div>
-    </div>
-    <div class="ddz-mid">
-      <div class="ddz-bottom-wrap"><span class="ddz-bottom-label">底牌</span><div class="ddz-bottom" id="ddzBottom"></div></div>
-      <div class="ddz-table" id="ddzTable"></div>
-      <div class="ddz-turn" id="ddzTurn"></div>
-    </div>
-    <div class="ddz-me">
-      <div class="ddz-me-bar">
-        <span class="ddz-me-name" id="ddzMeName"></span>
-        <span class="ddz-me-role" id="ddzMeRole"></span>
-        <span class="ddz-me-cnt" id="ddzMeCnt"></span>
-      </div>
-      <div class="ddz-hand" id="ddzHand"></div>
-      <div class="ddz-acts" id="ddzActs"></div>
-    </div>
-  </section>
 </div>
 
 <div class="mask" id="mask"></div>
@@ -200,6 +161,5 @@
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="assets/js/app.js"></script>
-<script src="assets/js/ddz.js"></script>
 </body>
 </html>
