@@ -101,81 +101,84 @@
 
       <div id="videos"></div>
 
-      <div id="msgs"></div>
+      <section id="ddz" class="ddz">
+        <button id="ddzChatToggle" class="ddz-chat-toggle" title="显示 / 隐藏聊天">💬 聊天</button>
+        <div class="ddz-seats">
+          <div class="ddz-seat" id="seat1">
+            <div class="ds-crown">👑</div>
+            <div class="ds-avatar">🤖</div>
+            <div class="ds-name">—</div>
+            <div class="ds-cnt">0 张</div>
+            <div class="ds-last" id="seat1Last"></div>
+          </div>
+          <div class="ddz-seat" id="seat2">
+            <div class="ds-crown">👑</div>
+            <div class="ds-avatar">🤖</div>
+            <div class="ds-name">—</div>
+            <div class="ds-cnt">0 张</div>
+            <div class="ds-last" id="seat2Last"></div>
+          </div>
+        </div>
+        <div class="ddz-mid">
+          <div class="ddz-bottom-wrap"><span class="ddz-bottom-label">底牌</span><div class="ddz-bottom" id="ddzBottom"></div></div>
+          <div class="ddz-table" id="ddzTable"></div>
+          <div class="ddz-turn" id="ddzTurn"></div>
+        </div>
+        <div class="ddz-me">
+          <div class="ddz-me-bar">
+            <span class="ddz-me-name" id="ddzMeName"></span>
+            <span class="ddz-me-role" id="ddzMeRole"></span>
+            <span class="ddz-me-cnt" id="ddzMeCnt"></span>
+          </div>
+          <div class="ddz-hand" id="ddzHand"></div>
+          <div class="ddz-acts" id="ddzActs"></div>
+        </div>
+      </section>
 
-      <footer>
-        <div class="composer">
-          <div class="tools">
-            <button class="tool" id="imgBtn" title="发送本地图片">
-              <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 15.5l-4.4-4.2L3.5 20"/></svg>
-            </button>
-            <button class="tool" id="shareBtn" title="共享本地视频（P2P 推流）">
-              <svg viewBox="0 0 24 24"><rect x="2.5" y="5.5" width="13" height="13" rx="2.5"/><path d="M15.5 10.5l6-3.4v9.8l-6-3.4z"/></svg>
-            </button>
-            <button class="tool" id="fileBtn" title="发送文件（图片 / 音视频 / Word / Excel / PPT / XMind 等）">
-              <svg viewBox="0 0 24 24"><path d="M14 3v4.4a1 1 0 0 0 1 1H20"/><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M12 17v-6M9.5 14.5L12 17l2.5-2.5"/></svg>
-            </button>
-            <button class="tool" id="camBtn" title="开启 / 关闭摄像头视频通话">
-              <span class="badge"></span>
-              <svg viewBox="0 0 24 24"><path d="M13.8 8.6a3.3 3.3 0 1 1-6.6 0 3.3 3.3 0 0 1 6.6 0z"/><path d="M3.4 20c0-3.7 3-5.9 6.6-5.9s6.6 2.2 6.6 5.9"/><path d="M18.6 6.6h3.4v8h-3.4z"/></svg>
-            </button>
-            <button class="tool" id="micBtn" title="开启 / 关闭麦克风">
-              <span class="badge"></span>
-              <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="10" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>
-            </button>
-            <button class="tool" id="muteBtn" title="静音 / 取消静音" style="display:none">
-              <svg viewBox="0 0 24 24"><path d="M9 6a3 3 0 0 1 6 0v5M5.5 11a6.5 6.5 0 0 0 10 5.5M12 17.5V21M8.5 21h7M4 4l16 16"/></svg>
-            </button>
+      <div id="chatFloat">
+        <div class="cf-hd"><span>聊天</span><button id="cfClose" class="cf-close" title="收起聊天">×</button></div>
+        <div id="msgs"></div>
+        <footer>
+          <div class="composer">
+            <div class="tools">
+              <button class="tool" id="imgBtn" title="发送本地图片">
+                <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 15.5l-4.4-4.2L3.5 20"/></svg>
+              </button>
+              <button class="tool" id="shareBtn" title="共享本地视频（P2P 推流）">
+                <svg viewBox="0 0 24 24"><rect x="2.5" y="5.5" width="13" height="13" rx="2.5"/><path d="M15.5 10.5l6-3.4v9.8l-6-3.4z"/></svg>
+              </button>
+              <button class="tool" id="fileBtn" title="发送文件（图片 / 音视频 / Word / Excel / PPT / XMind 等）">
+                <svg viewBox="0 0 24 24"><path d="M14 3v4.4a1 1 0 0 0 1 1H20"/><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M12 17v-6M9.5 14.5L12 17l2.5-2.5"/></svg>
+              </button>
+              <button class="tool" id="camBtn" title="开启 / 关闭摄像头视频通话">
+                <span class="badge"></span>
+                <svg viewBox="0 0 24 24"><path d="M13.8 8.6a3.3 3.3 0 1 1-6.6 0 3.3 3.3 0 0 1 6.6 0z"/><path d="M3.4 20c0-3.7 3-5.9 6.6-5.9s6.6 2.2 6.6 5.9"/><path d="M18.6 6.6h3.4v8h-3.4z"/></svg>
+              </button>
+              <button class="tool" id="micBtn" title="开启 / 关闭麦克风">
+                <span class="badge"></span>
+                <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="10" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>
+              </button>
+              <button class="tool" id="muteBtn" title="静音 / 取消静音" style="display:none">
+                <svg viewBox="0 0 24 24"><path d="M9 6a3 3 0 0 1 6 0v5M5.5 11a6.5 6.5 0 0 0 10 5.5M12 17.5V21M8.5 21h7M4 4l16 16"/></svg>
+              </button>
+            </div>
+            <div class="inwrap">
+              <textarea id="input" rows="1" placeholder="说点什么…  粘贴视频链接（B站 / YouTube / mp4 / m3u8 等）或直接发送文件"></textarea>
+              <button id="send" class="off" title="发送">
+                <svg viewBox="0 0 24 24"><path d="M4.5 12h15M13 5.5l6.5 6.5L13 18.5"/></svg>
+              </button>
+            </div>
           </div>
-          <div class="inwrap">
-            <textarea id="input" rows="1" placeholder="说点什么…  粘贴视频链接（B站 / YouTube / mp4 / m3u8 等）或直接发送文件"></textarea>
-            <button id="send" class="off" title="发送">
-              <svg viewBox="0 0 24 24"><path d="M4.5 12h15M13 5.5l6.5 6.5L13 18.5"/></svg>
-            </button>
+          <div class="hintbar">
+            <span><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行</span>
+            <span>📎 发送文件：图片/音视频/Word/Excel/PPT/XMind 实时预览</span>
+            <span>📹 摄像头按钮开启多人视频通话（P2P 直连）</span>
+            <span>视频链接支持 mp4/webm/m3u8/m4a 等格式</span>
           </div>
-        </div>
-        <div class="hintbar">
-          <span><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行</span>
-          <span>📎 发送文件：图片/音视频/Word/Excel/PPT/XMind 实时预览</span>
-          <span>📹 摄像头按钮开启多人视频通话（P2P 直连）</span>
-          <span>视频链接支持 mp4/webm/m3u8/m4a 等格式</span>
-        </div>
-      </footer>
+        </footer>
+      </div>
     </div>
   </main>
-
-  <section id="ddz" class="ddz">
-    <div class="ddz-seats">
-      <div class="ddz-seat" id="seat1">
-        <div class="ds-crown">👑</div>
-        <div class="ds-avatar">🤖</div>
-        <div class="ds-name">—</div>
-        <div class="ds-cnt">0 张</div>
-        <div class="ds-last" id="seat1Last"></div>
-      </div>
-      <div class="ddz-seat" id="seat2">
-        <div class="ds-crown">👑</div>
-        <div class="ds-avatar">🤖</div>
-        <div class="ds-name">—</div>
-        <div class="ds-cnt">0 张</div>
-        <div class="ds-last" id="seat2Last"></div>
-      </div>
-    </div>
-    <div class="ddz-mid">
-      <div class="ddz-bottom-wrap"><span class="ddz-bottom-label">底牌</span><div class="ddz-bottom" id="ddzBottom"></div></div>
-      <div class="ddz-table" id="ddzTable"></div>
-      <div class="ddz-turn" id="ddzTurn"></div>
-    </div>
-    <div class="ddz-me">
-      <div class="ddz-me-bar">
-        <span class="ddz-me-name" id="ddzMeName"></span>
-        <span class="ddz-me-role" id="ddzMeRole"></span>
-        <span class="ddz-me-cnt" id="ddzMeCnt"></span>
-      </div>
-      <div class="ddz-hand" id="ddzHand"></div>
-      <div class="ddz-acts" id="ddzActs"></div>
-    </div>
-  </section>
 </div>
 
 <div class="mask" id="mask"></div>

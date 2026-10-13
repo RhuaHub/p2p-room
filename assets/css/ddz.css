@@ -1,11 +1,17 @@
 /* ============== 斗地主（集成进 p2p-room，P2P 直连，房主发牌） ============== */
 
-/* 进入斗地主模式：隐藏聊天主区，显示牌桌 */
-#app.ddz-mode #main { display: none; }
+/* 进入斗地主模式：聊天区保留，牌桌叠加在聊天区之上，聊天可浮窗浮现 */
+#app.ddz-mode .center { position: relative; }
+#app.ddz-mode #aside { display: none; }
+#app.ddz-mode #stage,
+#app.ddz-mode #videos { display: none; }
 #app.ddz-mode #ddz { display: flex; }
 
 #ddz {
   display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   flex-direction: column;
   flex: 1;
   min-height: 0;
@@ -173,3 +179,48 @@
 .card.mini .rk { font-size: 11px; }
 .card.mini .st { font-size: 10px; }
 .card.mini.joker .jtxt { font-size: 9px; }
+
+/* ============== 聊天浮窗：牌桌之上浮现聊天 ============== */
+/* 普通聊天模式：chatFloat 作为中间区常规列，承载消息与输入 */
+#chatFloat { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+#chatFloat .cf-hd { display: none; }
+
+/* 斗地主模式：聊天变成可浮现的浮窗，盖在牌桌右下方（避开两家座位与自己的手牌） */
+#app.ddz-mode #chatFloat {
+  position: absolute;
+  right: 10px; bottom: 10px;
+  width: min(330px, 82%);
+  height: 46%;
+  z-index: 5;
+  background: rgba(255,250,240,.95);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(192,139,44,.4);
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.45);
+  overflow: hidden;
+  display: none;
+}
+#app.ddz-mode.chat-open #chatFloat { display: flex; }
+#app.ddz-mode #chatFloat .cf-hd {
+  display: flex; align-items: center; justify-content: space-between;
+  flex: none; padding: 9px 12px; border-bottom: 1px solid var(--line);
+  font-size: 13px; font-weight: 700; color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+#app.ddz-mode #chatFloat .cf-close {
+  border: 0; background: transparent; font-size: 20px; line-height: 1;
+  color: var(--text-2); cursor: pointer; padding: 0 4px;
+}
+#app.ddz-mode #chatFloat .cf-close:hover { color: var(--err); }
+
+/* 牌桌上唤起 / 收起聊天的按钮 */
+.ddz-chat-toggle {
+  position: absolute; top: 10px; right: 10px; z-index: 6;
+  border: 1px solid rgba(240,185,77,.5);
+  background: rgba(20,16,10,.55); color: #f3e7cf;
+  font-size: 13px; font-weight: 600; padding: 7px 13px; border-radius: 99px;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+}
+.ddz-chat-toggle:hover { background: rgba(40,30,16,.72); }
