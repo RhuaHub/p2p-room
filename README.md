@@ -47,22 +47,12 @@ python -m http.server 8000
 # 打开 http://localhost:8000
 ```
 
-## 自动化测试
-
-`tools/e2e.js` 是一套真实端到端测试：无头 Edge/Chrome（假摄像头 + 假麦克风）+ CDP 协议驱动三个真实页面，通过 PeerJS 公共信令**真实建连**后逐项断言。
-
-```bash
-node tools/e2e.js            # 需 Node 18+ 与本机 Edge / Chrome
-```
-
-覆盖 26 项：建房 / 加房 / 成员列表同步、文本收发与撤回、摄像头视频通话（含分辨率、关画面、静音、结束）、语音开关与静音状态同步、300KB 文件直传、60MB 大文件待接收流程、图片压缩通道、视频链接卡片、灯箱、本地视频共享推流、共享区双向同步、三人 mesh 广播、成员离开回收。脚本自带静态服务器与浏览器探测，退出码非 0 即有用例失败。
-
 ## 已知限制
 
 - **公共信令无 SLA**：PeerJS 官方公共云不保证可用性，高峰可能握手失败（实测出现过整轮建房超时）。代码已支持多信令自动切换，在 `assets/js/app.js` 顶部 `SIGNALING` 加一行自建地址即可，见「网络配置」。
 - **传输速率**：端到端约 2.5MB/s（60MB 文件约 24s），瓶颈在 SCTP 层，调大分片无明显提升。
 - **默认无 TURN 中继**：默认只配公共 STUN。对称型 NAT 或严格防火墙下打洞会失败，此时界面会明确提示需要 TURN，填入 `TURN_LIST` 即可，见「网络配置」。
-- **房间无持久化**：房主断开后房间即失效，不保存任何历史消息。
+- **消息无持久化**：不保存任何聊天历史（刷新后消息清空）；但刷新页面会**自动重进原房间**——房主复用同一房间号、访客检测到房主掉线后自愈重连，连接与房间不丢（仅在主动「离开」时才清会话）。
 - **人数上限**：mesh 拓扑下每人需与其余所有人建立连接。纯聊天建议 ≤ 6 人；开视频通话时建议 ≤ 4 人（每路 640×480 约占 0.5–1 Mbps 上行，4 人房间单人上行约 3 Mbps）。更多人数应改 SFU 架构。
 
 ## 部署
@@ -83,7 +73,7 @@ Workers & Pages → **Create** → **Pages** → **Connect to Git**，选中 `Rh
 | Build command | `mkdir -p dist && cp -r *.html assets _headers dist/` |
 | Build output directory | `dist` |
 
-构建命令把产物收进 `dist/`，避免 `tools/` 与 `README.md` 被公开访问；该命令与 Pages 构建容器行为一致，可在本机先跑一遍验证。
+构建命令把产物收进 `dist/`，避免 `README.md` 等非站点文件被公开访问；该命令与 Pages 构建容器行为一致，可在本机先跑一遍验证。
 
 首次连接需授权 Cloudflare 访问 GitHub 仓库（一次性）。绑定成功后每次 `git push` 自动重建，约 1 分钟生效。
 
@@ -117,7 +107,7 @@ var TURN_LIST = [
 
 ### 自建信令服务器
 
-公共服务没有 SLA，它一挂全站就建不了房。自建后把它放在 `SIGNALING` 第一位，公共的留作兜底：**主服务器握手超过 9 秒未响应，或返回 `network` / `server-error` 类错误时，会自动切到下一个。**
+公共服务没有 SLA，它一挂全站就建不了房。可在 `SIGNALING` 数组首位加入你自己的 PeerServer 地址，公共云留作兜底：**主服务器握手超过 9 秒未响应，或返回 `network` / `server-error` 类错误时，会自动切到下一个。** 只配一个服务器时不做超时切换，保持 PeerJS 原生重试行为，避免误伤慢网络用户。
 
 ```js
 var SIGNALING = [
@@ -128,15 +118,6 @@ var SIGNALING = [
 
 URL 拼法为 `/{path}{key}` —— 上面第一项对应 `wss://peer.yourdomain.com/peerjs`。若服务端用 `ExpressPeerServer(app, { path: '/myapp' })`，这里对应填 `path: '/myapp/'`（结尾斜杠不能少）。
 
-只配一个服务器时不做超时切换，保持 PeerJS 原生重试行为，避免误伤慢网络用户。
-
-`tools/peer-server.js` 是一份可直接运行的自建服务端示例：
-
-```bash
-npm i express peer
-node tools/peer-server.js        # 默认监听 9000，通过环境变量 PORT 修改
-```
-
 ## 文件结构
 
 ```
@@ -144,8 +125,7 @@ index.html              页面结构
 404.html                未匹配路径的响应页（Pages/GitHub Pages 自动识别）
 _headers                Pages 响应头与缓存规则
 assets/css/style.css    样式（设计变量集中在 :root，当前为暖金主题）
-assets/js/app.js        全部逻辑（信令、聊天、文件、语音、视频通话、共享、预览）
-tools/e2e.js            端到端自动化测试（无头浏览器 + CDP，26 项）
+assets/js/app.js        全部逻辑（信令、聊天、文件、语音、视频通话、共享、预览、刷新自动重进）
 ```
 
 ## License

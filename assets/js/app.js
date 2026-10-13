@@ -47,7 +47,9 @@
     selfSpeaking: false,
     syncLock: 0,
     transfers: {},      // fileId -> 传输状态
-    idRetry: 0
+    idRetry: 0,
+    reconnecting: false,
+    reconnTimer: null
   };
 
   var IMG = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif'];
@@ -250,6 +252,27 @@
     return String(Math.floor(Math.random() * 900000) + 100000);
   };
 
+  // 会话持久化：刷新 / 重开页面时自动回到上次房间；仅在主动「离开」时清除。
+  var SESS_KEY = 'rhua_session';
+  function saveSession() {
+    try {
+      localStorage.setItem(SESS_KEY, JSON.stringify({
+        nick: S.nick, room: S.roomId, role: S.isHost ? 'host' : 'guest', ts: Date.now()
+      }));
+    } catch (e) { /* noop */ }
+  }
+  function loadSession() {
+    try {
+      var s = JSON.parse(localStorage.getItem(SESS_KEY) || 'null');
+      // 7 天内的会话才自动恢复，避免陈旧会话误重进
+      if (s && s.room && /^\d{6}$/.test(s.room) && Date.now() - (s.ts || 0) < 7 * 864e5) return s;
+    } catch (e) { /* noop */ }
+    return null;
+  }
+  function clearSession() {
+    try { localStorage.removeItem(SESS_KEY); } catch (e) { /* noop */ }
+  }
+
   // 进房阶段盯着信令握手：超时说明这个服务器不可用，切下一个
   function armSigWatch() {
     clearTimeout(S.sigTimer);
@@ -270,12 +293,13 @@
   }
   function restartPeer() {
     try { if (S.peer) S.peer.destroy(); } catch (e) { /* noop */ }
-    if (S.isHost) startHost(); else startGuest(S.joinRoom || S.roomId);
+    if (S.isHost) startHost(S.roomId); else startGuest(S.joinRoom || S.roomId);
   }
 
-  function startHost() {
+  function startHost(savedRoom) {
     S.isHost = true;
-    S.roomId = genRoom();
+    // 刷新恢复场景：复用上次房间号作为 PeerJS ID，让房主刷新后房间号不变、成员可重连
+    S.roomId = (savedRoom && /^\d{6}$/.test(String(savedRoom))) ? String(savedRoom) : genRoom();
     S.peer = newPeer(S.roomId);
     bindPeer();
     armSigWatch();
@@ -327,9 +351,20 @@
 
   function onPeerError(err) {
     var t = err && err.type || '';
-    // 4 位数字空间小，撞号概率比原长随机号高，放宽重试上限直到拿到可用房间
-    if (t === 'unavailable-id' && S.isHost && S.idRetry < 30) {
-      S.idRetry++;
+    // 房主刷新恢复：房间号被占用通常只是旧实例还没释放，先复用同一房间号短暂重试；
+    // 超过上限（或确为持久占用）再换号，避免刷新后房间号漂移导致成员无法重连。
+    if (t === 'unavailable-id' && S.isHost) {
+      if (S.idRetry < 12) {
+        S.idRetry++;
+        setTimeout(function () {
+          if (!S.peer) return;
+          try { S.peer.destroy(); } catch (e) { /* noop */ }
+          S.peer = newPeer(S.roomId);   // 复用同一房间号
+          bindPeer();
+        }, 900);
+        return;
+      }
+      S.idRetry = 0;
       S.roomId = genRoom();
       try { S.peer.destroy(); } catch (e) { /* noop */ }
       S.peer = newPeer(S.roomId);
@@ -422,6 +457,7 @@
     renderUsers();
     sysMsg(S.isHost ? '房间创建成功，把房间号分享给朋友即可开始' : '已加入房间');
     if (S.isHost) toast('房间已创建，点击顶部复制房间号分享', 'ok', 4200);
+    saveSession();   // 记住当前房间，刷新后可自动重进
     setTimeout(function () { $('#input').focus(); }, 500);
   }
 
@@ -439,6 +475,31 @@
     if (!silent) sysMsg(info.nick + ' 离开了房间');
     renderUsers();
     if (!Object.keys(S.conns).length) setStatus('warn', '房间内仅你一人');
+    // 房主连接断开（如房主刷新）：访客自动重连同一房间，无需手动刷新
+    if (peerId === S.roomId && !S.isHost) scheduleReconnect();
+  }
+
+  // 访客自愈：房主掉线（刷新/重连）时，自动反复尝试重连同一房间号，直到房主回来或超时放弃。
+  function scheduleReconnect() {
+    if (S.isHost || !S.roomId || S.reconnecting) return;
+    S.reconnecting = true;
+    setStatus('warn', '房主已断开，重连中…');
+    sysMsg('与房主的连接中断，正在尝试重连…');
+    var tries = 0;
+    S.reconnTimer = setInterval(function () {
+      tries++;
+      if (S.conns[S.roomId]) {            // 已重新连上房主
+        clearInterval(S.reconnTimer); S.reconnTimer = null; S.reconnecting = false;
+        setStatus('ok', '已重新连接'); sysMsg('已重新连接房主'); return;
+      }
+      if (tries > 80) {                   // ~160s 仍无房主，放弃并提示手动刷新
+        clearInterval(S.reconnTimer); S.reconnTimer = null; S.reconnecting = false;
+        setStatus('err', '重连失败，请手动刷新页面'); return;
+      }
+      // peer 已销毁则重建，否则直接重试连接房主（更轻量）
+      if (!S.peer || S.peer.destroyed) startGuest(S.roomId);
+      else connectTo(S.roomId);
+    }, 2000);
   }
   function closeCall(map, peerId) {
     var c = map[peerId];
@@ -1781,6 +1842,7 @@
   $('#copyBtn').onclick = function () { copyText(S.roomId || ''); };
   $('#leaveBtn').onclick = function () {
     if (!confirm('确定离开房间？当前连接将全部断开。')) return;
+    clearSession();   // 主动离开才清会话，刷新不会清
     cleanup();
     location.reload();
   };
@@ -1812,11 +1874,25 @@
       toast('非安全上下文（建议 https 或 localhost），麦克风可能不可用', 'warn', 6500);
     }
     var q = (new URLSearchParams(location.search).get('room') || location.hash.replace(/^#/, '')).trim();
-    // 仅当链接里的房间号是合法的 6 位数字时才自动填入选房（旧 rm... 链接不再识别）
+    // 深链房间号优先：显式 ?room= / #room 进入指定房间，不做自动重进
     if (/^\d{6}$/.test(q)) {
       $('#modeJoin').click();
       $('#roomIn').value = q;
       $('#nick').focus();
+      return;
+    }
+    // 自动重进上次房间：刷新 / 重开页面不再弹出入口，直接回到房间
+    var s = loadSession();
+    if (s) {
+      $('#nick').value = s.nick || '';
+      toast('正在恢复上次房间…', 'info', 2000);
+      $('#goBtn').classList.add('busy');
+      $('#goBtn').disabled = true;
+      ensurePeer().then(function (ok) {
+        if (!ok) { gateErr('WebRTC 依赖加载失败，请检查网络或稍后重试'); return; }
+        if (s.role === 'host') startHost(s.room);
+        else { $('#modeJoin').click(); $('#roomIn').value = s.room; startGuest(s.room); }
+      });
     }
   })();
 })();
